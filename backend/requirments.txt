@@ -1,3 +1,1 @@
-
-#for the backend required packages 
-   dotenv -> pip install python-dotenv
+python-dotenv
