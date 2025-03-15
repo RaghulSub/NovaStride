@@ -1,69 +1,25 @@
 import json
-import pickle
-import ipaddress
-import numpy as np
-import pandas as pd
-
-# Load the trained model, encoders, and scaler
-with open("cloud_security_model.pkl", "rb") as f:
-    model = pickle.load(f)
-
-with open("label_encoders.pkl", "rb") as f:
-    label_encoders = pickle.load(f)
-
-with open("scaler.pkl", "rb") as f:
-    scaler = pickle.load(f)
-
-# Convert IP to integer
-def ip_to_int(ip):
-    try:
-        return int(ipaddress.ip_address(ip))
-    except ValueError:
-        return 0  # Default for invalid IPs
 
 def process_data(data):
     """
-    Processes received security event data, predicts anomalies using the trained model,
-    and returns JSON with IP addresses and detected security issues.
+    Processes security event data and returns a JSON response based on overallLabel.
     """
     try:
-        # Extract values safely
-        source_ip = data.get("securityEvent", {}).get("sourceIPAddress", "0.0.0.0")
-        attack_type = data.get("securityEvent", {}).get("attackType", "Unknown")
-        network_attack_type = data.get("networkEvent", {}).get("attackType", "Unknown")
-        system_attack_type = data.get("systemEvent", {}).get("attackType", "Unknown")
-        network_bytes = data.get("networkEvent", {}).get("bytesTransferred", 0)
-        network_packets = data.get("networkEvent", {}).get("packetsTransferred", 0)
-        cpu_usage = data.get("systemEvent", {}).get("cpuUtilization", 0)
-        memory_usage = data.get("systemEvent", {}).get("memoryUsage", 0)
-        disk_usage = data.get("systemEvent", {}).get("diskUsage", 0)
+        # Extract relevant fields
+        security_event = data.get("securityEvent", {})
+        source_ip = security_event.get("sourceIPAddress", "0.0.0.0")
+        attack_type = security_event.get("attackType", "None")
+        network_attack_type = data.get("networkEvent", {}).get("attackType", "None")
+        system_attack_type = data.get("systemEvent", {}).get("attackType", "None")
 
-        # Encode categorical features
-        attack_type_encoded = label_encoders["security_attack_type"].transform([attack_type])[0] \
-            if attack_type in label_encoders["security_attack_type"].classes_ else 0
-        network_attack_type_encoded = label_encoders["network_attack_type"].transform([network_attack_type])[0] \
-            if network_attack_type in label_encoders["network_attack_type"].classes_ else 0
-        system_attack_type_encoded = label_encoders["system_attack_type"].transform([system_attack_type])[0] \
-            if system_attack_type in label_encoders["system_attack_type"].classes_ else 0
-
-        # Normalize numerical features
-        numeric_features = np.array([[cpu_usage, memory_usage, disk_usage, network_bytes, network_packets]])
-        normalized_features = scaler.transform(numeric_features)
-
-        # Prepare input features
-        features = np.hstack((
-            [ip_to_int(source_ip)],
-            [attack_type_encoded, network_attack_type_encoded, system_attack_type_encoded],
-            normalized_features.flatten()
-        ))
-
-        # Predict using the trained model
-        prediction = model.predict([features])[0]
+        # Determine prediction based on overallLabel
+        overall_label = data.get("overallLabel", "Normal")
+        prediction = "Anomalous" if overall_label.lower() == "abnormal" else "Normal"
 
         # Return JSON response
         return json.dumps({
             "source_ip": source_ip,
-            "prediction": "Anomalous" if prediction == 1 else "Normal",
+            "prediction": prediction,
             "attack_type": attack_type,
             "network_attack_type": network_attack_type,
             "system_attack_type": system_attack_type
@@ -71,25 +27,46 @@ def process_data(data):
 
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=4)
+
+# Example usage
 sample_log = {
+    "eventTime": "2025-03-11T06:45:00.123456Z",
+    "eventSource": "aws.cloud",
+    "eventName": "SecurityAndSystemEvent",
+    "awsRegion": "us-east-1",
     "securityEvent": {
-        "sourceIPAddress": "192.168.1.10",
-        "attackType": "DDoS"
+        "sourceIPAddress": "192.168.1.100",
+        "destinationIPAddress": "10.0.0.20",
+        "userAgent": "API/Client",
+        "eventType": "AwsApiCall",
+        "eventName": "ConsoleLogin",
+        "responseElements": {
+            "ConsoleLogin": "Success"
+        },
+        "label": "Normal",
+        "attackType": "None"
     },
     "networkEvent": {
-        "attackType": "Port Scan",
-        "bytesTransferred": 2048,
-        "packetsTransferred": 50
+        "sourceIPAddress": "192.168.1.101",
+        "destinationIPAddress": "10.0.0.25",
+        "bytesTransferred": 50000,
+        "packetsTransferred": 150,
+        "status": "Normal Traffic",
+        "label": "Normal",
+        "attackType": "None"
     },
     "systemEvent": {
-        "attackType": "Privilege Escalation",
-        "cpuUtilization": 85.3,
-        "memoryUsage": 70.5,
-        "diskUsage": 60.2
-    }
+        "instanceId": "i-1234567890abcdef",
+        "cpuUtilization": 25.5,
+        "memoryUsage": 45.3,
+        "diskUsage": 55.0,
+        "status": "Stable",
+        "label": "Normal",
+        "attackType": "None"
+    },
+    "overallLabel": "Normal",
 }
 
+# Run the function and print the result
 result = process_data(sample_log)
-
-# Print the result
 print(result)
