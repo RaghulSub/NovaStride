@@ -62,7 +62,7 @@ async def send_json_data(json_data):
     except Exception as e:
         return [{"error": f"WebSocket error: {e}"}]
 
-st.title("WebSocket JSON Sender")
+st.title("Cloud Service Provide Log Analyzer")
 
 uploaded_file = st.file_uploader("Upload JSON File", type=["json"])
 
