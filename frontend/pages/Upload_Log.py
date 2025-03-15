@@ -1,65 +1,38 @@
 import streamlit as st
+import asyncio
+import websockets
 import json
-import socket
 
-# Socket server configuration (server runs on port 8000)
-HOST = "localhost"
-PORT = 8000
-
-def send_json_data(data):
-    """
-    Sends JSON data over a socket to a server and collects multiple responses.
-    The server sends each processed event as a JSON string terminated by a newline.
-    Returns a list of JSON responses.
-    """
+async def send_json_data(json_data):
+    uri = "ws://localhost:8000/ws"
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-            client_socket.connect((HOST, PORT))
-            # Convert the JSON data to a string then encode to bytes.
-            json_data = json.dumps(data).encode("utf-8")
-            client_socket.sendall(json_data)
-            
-            # Receive responses until the connection is closed.
-            received_data = ""
-            while True:
-                chunk = client_socket.recv(1024)
-                if not chunk:
-                    break
-                received_data += chunk.decode("utf-8")
-            
-            # Split received data on newline to get each JSON response.
+        async with websockets.connect(uri) as websocket:
+            await websocket.send(json.dumps(json_data))
             responses = []
-            for line in received_data.split("\n"):
-                if line.strip():
-                    responses.append(json.loads(line))
+            
+            while True:
+                try:
+                    response = await asyncio.wait_for(websocket.recv(), timeout=5)  # Timeout if no response in 5 sec
+                    responses.append(json.loads(response))
+                except asyncio.TimeoutError:
+                    break  # Stop if no data received for 5 seconds
+                except websockets.exceptions.ConnectionClosed:
+                    break  # Stop if server closes connection
+            
             return responses
     except Exception as e:
-        st.error(f"Socket connection failed: {e}")
-        return None
+        return [{"error": f"WebSocket error: {e}"}]
 
-st.title("Upload JSON Log File and Send via Socket")
-st.markdown("Upload your JSON log file (which should contain a JSON list of events) and click the button to send it to the socket server.")
+st.title("WebSocket JSON Sender")
 
-# File uploader for the JSON file.
-uploaded_file = st.file_uploader("Choose a JSON log file", type=["json"])
+uploaded_file = st.file_uploader("Upload JSON File", type=["json"])
 
 if uploaded_file is not None:
-    try:
-        # Parse the uploaded JSON file.
-        data = json.load(uploaded_file)
-        st.subheader("Uploaded JSON Data")
-        st.json(data)
-        
-        # Button to send data via the socket.
-        if st.button("Send JSON to Socket Server"):
-            responses = send_json_data(data)
-            if responses is not None:
-                st.success("Data sent successfully!")
-                st.subheader("Server Responses")
-                # Display each JSON response from the server.
-                for response in responses:
-                    st.json(response)
-            else:
-                st.error("Failed to receive a response from the server.")
-    except Exception as e:
-        st.error(f"Error reading JSON file: {e}")
+    json_data = json.load(uploaded_file)
+    st.json(json_data)
+
+    if st.button("Send JSON via WebSocket"):
+        responses = asyncio.run(send_json_data(json_data))
+        st.subheader("Server Responses")
+        for response in responses:
+            st.json(response)
